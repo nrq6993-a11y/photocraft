@@ -68,6 +68,9 @@ unsafe_code = "forbid"
 dbg_macro = "warn"
 todo = "warn"
 
+[patch.crates-io]
+egui-winit = { path = "vendor/egui-winit" }
+
 [profile.dev.package."*"]
 opt-level = 2
 

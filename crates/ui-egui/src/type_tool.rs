@@ -811,9 +811,10 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                 copy_selection(app, ctx);
             }
             egui::Event::Cut => cut_selection(app, ctx),
-            egui::Event::Key { key, pressed: true, modifiers: m, .. } => {
+            egui::Event::Key { key, physical_key, pressed: true, modifiers: m, .. } => {
                 use egui::Key;
                 let key = &flow_key(*key, vertical_flow);
+                let keypad_enter = *physical_key == Some(Key::F35);
                 match key {
                     // Photoshop's type formatting keys act on the selected characters and win
                     // over the global ⇧⌘K/U/B/I (Color Settings, Desaturate, Auto Color, Inverse)
@@ -898,6 +899,8 @@ pub fn handle_keys(app: &mut PhotocraftApp, ctx: &egui::Context) -> bool {
                         set(app, to, m.shift);
                     }
                     Key::Enter if m.command => commit_with(app, *m),
+                    // Photoshop: keypad Enter commits; main Enter inserts a line break (see #6007).
+                    Key::Enter if keypad_enter => commit_with(app, *m),
                     Key::Enter => insert(app, "\n"),
                     // Photoshop types a tab character; layout advances it to the next tab stop.
                     Key::Tab if !m.command && !m.alt && !m.shift => insert(app, "\t"),
