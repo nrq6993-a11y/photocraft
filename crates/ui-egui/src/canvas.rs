@@ -243,9 +243,40 @@ pub(crate) fn marquee_preview_px(o: &crate::state::ToolOptions, d: &Drag, zoom: 
         return None;
     }
     let last = d.points.last().map_or(d.start, |p| [p[0], p[1]]);
-    let (a, b) = marquee_corners(o, d, last);
-    let r = marquee_px(a, b);
+    let (shift, alt) = d.marquee_mods();
+    let r = if o.marquee_style == "fixedSize" {
+        let e = crate::chrome_ui::marquee_end(
+            &o.marquee_style,
+            o.marquee_width as f64,
+            o.marquee_height as f64,
+            shift,
+            d.start,
+            last,
+        );
+        fixed_size_marquee_px(d.start, e, alt, o.marquee_width as f64, o.marquee_height as f64)
+    } else {
+        let (a, b) = marquee_corners(o, d, last);
+        marquee_px(a, b)
+    };
     (r[2] > r[0] && r[3] > r[1]).then_some(r)
+}
+
+/// Pixel bounds for Style: Fixed Size — exactly `w`×`h` document pixels, not one larger (#6015).
+pub fn fixed_size_marquee_px(start: [f64; 2], end: [f64; 2], from_center: bool, w: f64, h: f64) -> [f64; 4] {
+    let w = w.max(1.0).round() as i64;
+    let h = h.max(1.0).round() as i64;
+    let (x0, y0) = if from_center {
+        let cx = start[0].round() as i64;
+        let cy = start[1].round() as i64;
+        ((cx * 2 - w + 1) / 2, (cy * 2 - h + 1) / 2)
+    } else {
+        let sx = if end[0] >= start[0] { 1 } else { -1 };
+        let sy = if end[1] >= start[1] { 1 } else { -1 };
+        let x0 = if sx > 0 { start[0].floor() as i64 } else { (start[0].ceil() as i64) - w };
+        let y0 = if sy > 0 { start[1].floor() as i64 } else { (start[1].ceil() as i64) - h };
+        (x0, y0)
+    };
+    [x0 as f64, y0 as f64, (x0 + w) as f64, (y0 + h) as f64]
 }
 
 /// The pixel rectangle `[x0, y0, x1, y1]` a marquee between two corners selects.

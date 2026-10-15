@@ -189,6 +189,27 @@ fn show_transformation_values_off_hides_the_free_transform_readout() {
     }
 }
 
+/// storytold/photocraft#6015: Fixed Size must select exactly the requested width and height.
+#[test]
+fn fixed_size_matches_the_options_bar_pixels() {
+    for (w, ht) in [(1.0, 1.0), (10.0, 10.0)] {
+        let mut h = harness(Tool::RectMarquee);
+        h.state_mut().ui.tool_options.marquee_style = "fixedSize".into();
+        h.state_mut().ui.tool_options.marquee_width = w;
+        h.state_mut().ui.tool_options.marquee_height = ht;
+        // Between pixel edges at 100 % zoom — the old floor/ceil path added one pixel per axis.
+        press_at(&mut h, 100.5, 100.5, Modifiers::NONE);
+        let wi = w.round() as u32;
+        let hi = ht.round() as u32;
+        move_to(&mut h, 120.0, 120.0);
+        assert!(readout(&h, wi as i32, hi as i32), "{w}x{ht} while dragging");
+        release_at(&mut h, 120.0, 120.0, Modifiers::NONE);
+        let r = selection(&h);
+        assert_eq!(r.width(), wi, "{w}x{ht} width");
+        assert_eq!(r.height(), hi, "{w}x{ht} height");
+    }
+}
+
 #[test]
 fn alt_draws_from_the_centre_and_shift_alt_a_centred_circle() {
     let mut h = harness(Tool::RectMarquee);
