@@ -1395,19 +1395,21 @@ pub fn pointer(app: &mut PhotocraftApp, ev: ToolEvent, mods: egui::Modifiers) ->
     match ev {
         ToolEvent::Down { x, y, .. } => {
             let mut h = hit(&t, [x, y], tol);
+            let mut pivot0 = t.pivot;
             // ⌥-click away from the handles moves the reference point there (and drags it).
             if mods.alt
                 && matches!(h, Hit::Inside | Hit::Outside)
                 && let Some(s) = app.ui.transform.as_mut()
             {
                 s.pivot = [x, y];
+                pivot0 = [x, y];
                 h = Hit::Pivot;
             }
             // Distort only moves corners (and the whole box from inside): no rotating, no edges.
             // Even in Distort mode, remember an outside press so a plain click can
             // accept the transform. A drag outside remains inert in that mode, in Skew, and in
             // Content-Aware Scale, which only scales and moves.
-            pv.gesture = (mode_allows(t.mode, h) || h == Hit::Outside).then_some(Gesture { hit: h, start: [x, y], quad0: t.quad, pivot0: t.pivot });
+            pv.gesture = (mode_allows(t.mode, h) || h == Hit::Outside).then_some(Gesture { hit: h, start: [x, y], quad0: t.quad, pivot0 });
         }
         ToolEvent::Move { x, y, .. } | ToolEvent::Up { x, y } => {
             let g = pv.gesture;
@@ -2825,8 +2827,6 @@ pub(crate) fn position_size_fields(app: &mut PhotocraftApp, ui: &mut egui::Ui, t
     if (rx.changed() || ry.changed())
         && let Some(s) = app.ui.transform.as_mut()
     {
-        let (dx, dy) = (px as f64 - s.pivot[0], py as f64 - s.pivot[1]);
-        s.quad = s.quad.map(|q| [q[0] + dx, q[1] + dy]);
         s.pivot = [px as f64, py as f64];
     }
     crate::widgets::vline(ui, 22.0);
@@ -3494,6 +3494,19 @@ mod tests {
         assert!(parent.is_some_and(|st| st.doc.layer(placed_layer).is_some()), "the placed Smart Object must remain in the parent document");
         assert!(app.ui.transform.is_none(), "the transform session should end");
         assert!(app.transform_preview.is_none(), "the transform preview should end");
+    }
+
+    /// Options-bar X/Y reposition the reference point only; the box stays put (#6812, #5019).
+    #[test]
+    fn reference_point_fields_move_only_the_pivot() {
+        let quad0 = session().quad;
+        let t = type_into_bar_field(0, "0");
+        assert!((t.pivot[0]).abs() < 1.0, "{:?}", t.pivot);
+        assert!(close(t.quad, quad0), "the box did not move: {:?}", t.quad);
+        let mut s = session();
+        s.pivot = [25.0, 25.0];
+        drag(&mut s, [100.0, 25.0], [175.0, 25.0], egui::Modifiers::ALT);
+        assert!(close(s.quad, corners([-25.0, -25.0, 175.0, 75.0])), "{:?}", s.quad);
     }
 
     /// Large documents need scales past 10000% and positions past 30000 px (#1267).
@@ -4818,6 +4831,49 @@ mod tests {
         assert!((s.quad[0][0] - s.quad[0][1]).abs() < 1e-9 && s.quad[0][0] > 15.0, "diagonal: {:?}", s.quad[0]);
         apply_drag(&mut s, g, [41.0, 60.0], egui::Modifiers::SHIFT);
         assert!(close(s.quad, corners([0.0, 40.0, 100.0, 90.0])), "vertical: {:?}", s.quad);
+    }
+
+    /// #6812 / #5019: after ⌥-click moves the reference point, ⌥-scaling must not jump the box
+    /// so its centre sits on the pivot.
+    #[test]
+    fn alt_click_then_alt_scale_does_not_snap_the_box_to_the_pivot() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_square(64, photocraft_geom::Rect::new(8, 8, 24, 24));
+        begin(&mut app, &ctx).unwrap();
+        let quad0 = app.ui.transform.as_ref().unwrap().quad;
+        let pivot = [40.0, 40.0];
+        let alt = egui::Modifiers::ALT;
+        pointer(&mut app, ToolEvent::Down { x: pivot[0], y: pivot[1], pressure: 1.0 }, alt);
+        pointer(&mut app, ToolEvent::Up { x: pivot[0], y: pivot[1] }, alt);
+        assert_eq!(app.ui.transform.as_ref().unwrap().pivot, pivot);
+        assert_eq!(app.ui.transform.as_ref().unwrap().quad, quad0);
+        let from = quad0[2];
+        let to = [from[0] + 8.0, from[1] + 8.0];
+        let mods = egui::Modifiers { alt: true, shift: true, ..Default::default() };
+        pointer(&mut app, ToolEvent::Down { x: from[0], y: from[1], pressure: 1.0 }, mods);
+        pointer(&mut app, ToolEvent::Move { x: to[0], y: to[1], pressure: 1.0 }, mods);
+        pointer(&mut app, ToolEvent::Up { x: to[0], y: to[1] }, mods);
+        let got = app.ui.transform.as_ref().unwrap().quad;
+        let mut want = TransformSession {
+            session: 0,
+            layer: 0,
+            rect: app.ui.transform.as_ref().unwrap().rect,
+            quad: quad0,
+            pivot,
+            interpolation: String::new(),
+            warp: None,
+            selection: false,
+            target: None,
+            path: None,
+            made: None,
+            mode: Default::default(),
+            content_aware: None,
+            skew_v: 0.0,
+        };
+        let g = Gesture { hit: hit(&want, from, 8.0), start: from, quad0: want.quad, pivot0: want.pivot };
+        apply_mode_drag(&mut want, g, to, TransformMode::Free, false, mods);
+        assert!(close(got, want.quad), "pointer path {:?}, want {:?}", got, want.quad);
+        assert!(near(app.ui.transform.as_ref().unwrap().pivot, pivot), "{:?}", app.ui.transform.as_ref().unwrap().pivot);
     }
 
     #[test]
