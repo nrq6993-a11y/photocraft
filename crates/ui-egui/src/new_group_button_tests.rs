@@ -1,5 +1,5 @@
-//! #2561: the Layers panel New Group button. Like Photoshop a plain click adds an empty group
-//! and Shift-click groups the selected layers.
+//! #2561 / #7105: the Layers panel New Group button. A plain click with several layers selected
+//! groups them; with one or none it adds an empty group. Shift-click also groups the selection.
 
 use egui::Modifiers;
 use egui_kittest::kittest::Queryable;
@@ -42,8 +42,28 @@ fn shift_click_groups_the_selected_layers_in_order() {
 }
 
 #[test]
-fn plain_click_still_adds_an_empty_group() {
+fn plain_click_groups_when_several_layers_are_selected() {
     let (mut h, a, b) = two_selected();
+    h.get_by_label("Create a new group").click();
+    h.run_steps(4);
+    let groups = groups(&h);
+    assert_eq!(groups.len(), 1);
+    let children: Vec<LayerId> = groups[0].children().unwrap().iter().map(|l| l.id).collect();
+    assert_eq!(children, vec![a, b]);
+    let doc = &h.state().session.active().unwrap().doc;
+    assert_eq!(doc.layers.len(), 2, "background and the new group stay at the top level");
+}
+
+#[test]
+fn plain_click_with_one_layer_adds_an_empty_group() {
+    let mut s = photocraft_engine::Session::new();
+    s.execute("file.new", json!({"width": 8, "height": 8})).unwrap();
+    let a = LayerId(s.execute("layer.new.layer", json!({"name": "A"})).unwrap()["layer"].as_u64().unwrap());
+    let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_max_steps(64).build_eframe(|cc| {
+        PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+        PhotocraftApp::new(s, crate::Services::default())
+    });
+    h.run_steps(4);
     h.get_by_label("Create a new group").click();
     h.run_steps(4);
     let groups = groups(&h);
@@ -51,5 +71,5 @@ fn plain_click_still_adds_an_empty_group() {
     assert!(groups[0].children().unwrap().is_empty());
     let doc = &h.state().session.active().unwrap().doc;
     let top: Vec<LayerId> = doc.layers.iter().map(|l| l.id).collect();
-    assert_eq!(top[1..3], [a, b], "the selected layers stay where they were");
+    assert_eq!(top[1], a, "the lone layer stays where it was");
 }
