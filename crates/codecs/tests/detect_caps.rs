@@ -60,6 +60,7 @@ fn default_build_formats_all_symmetric() {
         Format::Hdr,
         Format::Fits,
         Format::Dpx,
+        Format::Wbmp,
     ];
     for f in expected {
         assert!(caps(f).read && caps(f).write, "{f:?}");
@@ -153,6 +154,15 @@ fn detect_magic_gif() {
     assert_eq!(detect(b"GIF89a\x01\0"), Some(Format::Gif));
     assert_eq!(detect(b"GIF90a\x01\0"), None);
 }
+#[test]
+fn detect_magic_wbmp() {
+    let px: Vec<bool> = (0..13 * 5).map(|i| i % 3 == 0).collect();
+    let bytes = photocraft_codecs::web::encode_wbmp(13, 5, &px).unwrap();
+    assert_eq!(detect(&bytes), Some(Format::Wbmp));
+    assert_eq!(from_extension("icon.wbmp"), Some(Format::Wbmp));
+    assert_eq!(detect(&[0, 0, 1, 0, 1, 0]), Some(Format::Ico), "ICO wins over WBMP when both prefixes match");
+}
+
 #[test]
 fn detect_magic_bmp() {
     let mut b = b"BM".to_vec();

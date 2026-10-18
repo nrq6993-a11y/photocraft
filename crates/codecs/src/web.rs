@@ -7,7 +7,10 @@
 use std::collections::HashMap;
 
 use crate::error::CodecError;
+use crate::fidelity::Plan;
 use crate::format::Format;
+use crate::image::{ChannelLayout, Image, SampleType};
+use crate::options::{EncodeOptions, Limits};
 
 fn gif_err(msg: impl Into<String>) -> CodecError {
     CodecError::InvalidImage(msg.into())
@@ -282,6 +285,78 @@ pub fn decode_wbmp(bytes: &[u8]) -> Result<(u32, u32, Vec<bool>), CodecError> {
         }
     }
     Ok((w, h, px))
+}
+
+/// Header and size check for magic-number detection (no pixel buffer allocated).
+pub fn looks_like_wbmp(bytes: &[u8]) -> bool {
+    probe_wbmp(bytes, &Limits::default()).is_ok()
+}
+
+/// Dimensions of a type-0 WBMP when the file is complete and within `limits`.
+pub fn probe_wbmp(bytes: &[u8], limits: &Limits) -> Result<(u32, u32), CodecError> {
+    let bad = || CodecError::InvalidImage("not a type 0 WBMP".into());
+    let mut i = 0usize;
+    let mut next = || -> Result<u8, CodecError> {
+        let b = *bytes.get(i).ok_or_else(bad)?;
+        i += 1;
+        Ok(b)
+    };
+    if next()? != 0 || next()? & 0x9f != 0 {
+        return Err(bad());
+    }
+    let mut mb = || -> Result<u32, CodecError> {
+        let mut v: u32 = 0;
+        for _ in 0..5 {
+            let b = next()?;
+            v = v.checked_mul(128).ok_or_else(bad)? | u32::from(b & 0x7f);
+            if b & 0x80 == 0 {
+                return Ok(v);
+            }
+        }
+        Err(bad())
+    };
+    let (w, h) = (mb()?, mb()?);
+    limits.check(w, h, ChannelLayout::Gray, SampleType::U8)?;
+    let stride = (w as usize).div_ceil(8);
+    let need = i + stride * h as usize;
+    if bytes.len() < need {
+        return Err(bad());
+    }
+    Ok((w, h))
+}
+
+/// Decode a WBMP file into an 8-bit grayscale [`Image`].
+pub fn decode_wbmp_image(bytes: &[u8], limits: &Limits) -> Result<Image, CodecError> {
+    let (w, h, px) = decode_wbmp(bytes)?;
+    limits.check(w, h, ChannelLayout::Gray, SampleType::U8)?;
+    let samples: Vec<u8> = px.into_iter().map(|white| if white { 255 } else { 0 }).collect();
+    Image::from_u8(w, h, ChannelLayout::Gray, samples)
+}
+
+/// Encode an image as a type-0 WBMP (pixels ≥ 50% luma become white).
+pub(crate) fn encode_wbmp_image(image: &Image, plan: &Plan, _opts: &EncodeOptions) -> Result<Vec<u8>, CodecError> {
+    let img = image.converted(plan.layout, plan.sample);
+    let (w, h) = img.dimensions();
+    let mut white = Vec::with_capacity(img.pixel_count());
+    for y in 0..h {
+        for x in 0..w {
+            let l = luma_at(&img, x, y);
+            white.push(l >= 0.5);
+        }
+    }
+    encode_wbmp(w, h, &white)
+}
+
+fn luma_at(img: &Image, x: u32, y: u32) -> f32 {
+    match img.layout() {
+        ChannelLayout::Gray | ChannelLayout::GrayA => img.get(x, y, 0),
+        ChannelLayout::Rgb | ChannelLayout::Rgba => {
+            0.299 * img.get(x, y, 0) + 0.587 * img.get(x, y, 1) + 0.114 * img.get(x, y, 2)
+        }
+        ChannelLayout::Cmyk => 1.0 - img.get(x, y, 3),
+        ChannelLayout::CmykA => 1.0 - img.get(x, y, 3),
+        ChannelLayout::Lab | ChannelLayout::LabA => img.get(x, y, 0),
+    }
 }
 
 /// JPEG from 8-bit RGB (`rgb.len() == 3·w·h`): quality 1..=100, optional progressive scans and

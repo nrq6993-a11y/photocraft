@@ -146,6 +146,26 @@ mod exr {
 mod hdr {
     cases!(Format::Hdr);
 }
+mod wbmp {
+    use super::*;
+
+    #[test]
+    fn binary_gray_u8() {
+        let mut samples = vec![0u8; 16 * 12];
+        for y in 0..12 {
+            for x in 0..16 {
+                samples[y * 16 + x] = if (x + y) % 2 == 0 { 255 } else { 0 };
+            }
+        }
+        let img = Image::from_u8(16, 12, ChannelLayout::Gray, samples).unwrap();
+        let bytes = encode(&img, Format::Wbmp, &EncodeOptions::default()).unwrap();
+        assert_eq!(detect(&bytes), Some(Format::Wbmp));
+        let back = decode(&bytes).unwrap();
+        assert_eq!(back.dimensions(), img.dimensions());
+        assert_eq!(back.layout(), ChannelLayout::Gray);
+        assert_eq!(back.as_u8(), img.as_u8());
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Targeted round-trips beyond the matrix
